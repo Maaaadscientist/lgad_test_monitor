@@ -39,7 +39,7 @@ def generate_layout():
             html.Div([html.Label("Measurement Duration (s):"), dcc.Input(id='input-measurement-duration', type='number')]),
             html.Div([html.Label("Sample Interval (s):"), dcc.Input(id='input-sample-interval', type='number')]),
             html.Div([html.Label("Stabilization Time (s):"), dcc.Input(id='input-stabilization-time', type='number')]),
-            html.Div([html.Label("Maximum Current (A):"), dcc.Input(id='input-maximum-current', type='number')]),
+            html.Div([html.Label("Maximum Current (μA):"), dcc.Input(id='input-maximum-current', type='number')]),
         
             html.Br(),
             html.Button("Confirm", id='confirm-config', n_clicks=0, style={'marginRight': '10px'}),
@@ -47,16 +47,42 @@ def generate_layout():
             html.Div(id='config-status', style={'color': 'green', 'marginTop': '10px'})
         ]),
 
-#        # 状态显示文本
-        html.Div(id='env-status', style={
-            'margin': '15px',
-            'fontSize': 20,
-            'fontWeight': 'bold',
-            'color': 'blue',
-            'textAlign': 'center'
-        }),
-        html.Div(id='live-status', style={
-         'margin': '15px', 'fontSize': 18, 'fontWeight': 'bold', 'color': '#003366'}),
+#       # # 状态显示文本
+        #html.Div(id='env-status', style={
+        #    'margin': '15px',
+        #    'fontSize': 20,
+        #    'fontWeight': 'bold',
+        #    'color': 'blue',
+        #    'textAlign': 'center'
+        #}),
+        #html.Div(id='live-status', style={
+        # 'margin': '15px', 'fontSize': 18, 'fontWeight': 'bold', 'color': '#003366'}),
+        html.Div(
+            id='env-status',
+            style={
+                'display': 'inline-block',
+                'margin': '15px',
+                'fontSize': 20,
+                'fontWeight': 'bold',
+                'color': 'blue',
+                'textAlign': 'center',
+                # 如果需要，可以给一个固定宽度或 maxWidth
+                'width': '45%',  
+                # 这样两个 inline-block 加上宽度，就能左右并排
+            }
+        ),
+        html.Div(
+            id='live-status',
+            style={
+                'display': 'inline-block',
+                'margin': '15px',
+                'fontSize': 18,
+                'fontWeight': 'bold',
+                'color': '#003366',
+                'width': '45%',
+                # 同理设置宽度，保持在同一行
+            }
+        ),
         dcc.Graph(
             id='live-graph',
             style={'width': '90vw', 'height': '36vh',}  # 使用视口单位

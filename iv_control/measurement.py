@@ -39,7 +39,7 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
     measurement_duration = cfg['measurement_duration']
     sample_interval = cfg['sample_interval']
     stabilization_time = cfg['stabilization_time']
-    maximum_current = cfg['maximum_current']
+    maximum_current = cfg['maximum_current'] * 1e-6
 
     voltages = np.arange(start_voltage, stop_voltage + step_voltage, step_voltage)
 
