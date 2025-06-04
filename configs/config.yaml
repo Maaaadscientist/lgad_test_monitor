@@ -1,4 +1,6 @@
-maximum_current: 1.0e-06
+ac_frequency: 10
+ac_voltage: 100
+maximum_current: 1
 measurement_duration: 10
 sample_interval: 0.5
 stabilization_time: 5

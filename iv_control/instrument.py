@@ -1,10 +1,10 @@
 import usbtmc, time, usb.backend.libusb1
 from iv_control.config import load_config
 
-backend = usb.backend.libusb1.get_backend()
-instr = usbtmc.Instrument(0x05E6, 0x2470, backend=backend)
 
 def setup_instrument():
+    backend = usb.backend.libusb1.get_backend()
+    instr = usbtmc.Instrument(0x05E6, 0x2470, backend=backend)
     cfg = load_config()  # ✅ 每次运行动态读取配置
 
     start_voltage = cfg['start_voltage']

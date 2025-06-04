@@ -146,21 +146,21 @@ def register_iv_plot_callback(app):
             title='I–V Curve',
             title_font=dict(color='black',size=20,weight=300,shadow='1px 1px 2px midnightblue',family=font_family),
             margin=dict(l=20, r=80, t=40, b=20),
-            plot_bgcolor='midnightblue',
-            paper_bgcolor='darkturquoise',
+            plot_bgcolor='royalblue',
+            paper_bgcolor='lightseagreen',
             xaxis_title='Voltage (V)',
             yaxis_title='Current (A)',
             autosize=True
         )
         fig.update_yaxes(
             linewidth=2,
-            title_font=dict(family=font_family,size=20,shadow='0 0 3px #ff6600',weight=500),
+            title_font=dict(family=font_family,size=20,shadow='1 1 2px midnightblue',weight=500),
             tickfont=dict(family=font_family,size=18,weight=400)
         )
         fig.update_xaxes(
             linewidth=2,
             #title_font=dict(family=font_family,size=20,weight=300),
-            title_font=dict(family=font_family,size=20,shadow='0 0 3px #ff6600',weight=500),
+            title_font=dict(family=font_family,size=20,shadow='1 1 2px midnightblue',weight=500),
             tickfont=dict(family=font_family,size=18,weight=400)
         )
         data_points = []
@@ -191,8 +191,9 @@ def register_iv_plot_callback(app):
                 y=currents,
                 mode='markers+lines',
                 name='I–V Curve',
-                marker=dict(color='red',symbol='square',size=5),
-                marker_line=dict(color='lightpink',width=3),
+                marker=dict(color='gold',symbol='square',size=10),
+                marker_line=dict(color='orange',width=4),
+                line=dict(color='orange',width=4),
             ))
 
             fig.update_layout(

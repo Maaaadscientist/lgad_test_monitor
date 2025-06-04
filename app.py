@@ -6,6 +6,7 @@ from callbacks.graph import register_graph_callback
 from callbacks.env_status import register_env_status_callback
 from callbacks.iv_control import register_iv_control_callbacks
 from callbacks.iv_plot import register_iv_plot_callback
+from callbacks.cv_plot import register_cv_plot_callback
 import threading
 
 import dash_bootstrap_components as dbc
@@ -19,6 +20,8 @@ shared_status = {
     "voltage": None,
     "current": None,
     "time": None,
+    "parallel-resistance": None,
+    "parallel-capacitance": None,
     "temperature": None,   # ✅ 新增
     "humidity": None,       # ✅ 新增
 }
@@ -31,6 +34,7 @@ register_iv_control_callbacks(app, shared_status, time_series, current_series, i
 register_env_status_callback(app, shared_status)
 register_graph_callback(app, shared_status, time_series, current_series)
 register_iv_plot_callback(app)
+register_cv_plot_callback(app)
 # ========== 启动 App ==========
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8050)

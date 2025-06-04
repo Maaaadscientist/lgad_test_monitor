@@ -3,12 +3,9 @@ import numpy as np
 import pandas as pd
 import os
 from datetime import datetime
-from iv_control.instrument import setup_instrument, instr
+from iv_control.instrument import setup_instrument
 from iv_control.config import load_config
 import threading
-
-
-
 
 def set_stop_event(event):
     global stop_event
@@ -43,7 +40,7 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
 
     voltages = np.arange(start_voltage, stop_voltage + step_voltage, step_voltage)
 
-    setup_instrument()
+    instr = setup_instrument()
     iv_curve.clear()
 
     for v in voltages:

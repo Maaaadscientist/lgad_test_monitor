@@ -4,7 +4,6 @@ import threading
 import yaml
 import dash
 from dash import Input, Output, State, callback_context as ctx
-from iv_control.instrument import instr
 from iv_control.measurement import perform_measurement
 
 def register_iv_control_callbacks(app, _shared_status, _time_series, _current_series, _iv_curve, _stop_event):
@@ -61,6 +60,8 @@ def register_iv_control_callbacks(app, _shared_status, _time_series, _current_se
         Output('input-sample-interval', 'value'),
         Output('input-stabilization-time', 'value'),
         Output('input-maximum-current', 'value'),
+        Output('input-ac-voltage', 'value'),
+        Output('input-ac-frequency', 'value'),
         Input('config-button', 'n_clicks'),
         Input('confirm-config', 'n_clicks'),
         State('input-start-voltage', 'value'),
@@ -70,11 +71,13 @@ def register_iv_control_callbacks(app, _shared_status, _time_series, _current_se
         State('input-sample-interval', 'value'),
         State('input-stabilization-time', 'value'),
         State('input-maximum-current', 'value'),
+        State('input-ac-voltage', 'value'),
+        State('input-ac-frequency', 'value'),
         State('config-store', 'data'),
         prevent_initial_call=True
     )
     def unified_config_handler(config_clicks, confirm_clicks,
-                               sv, ev, step, dur, si, stab, maxc,
+                               sv, ev, step, dur, si, stab, maxc, acv, acf,
                                current_store):
         triggered_id = ctx.triggered_id
 
@@ -87,7 +90,9 @@ def register_iv_control_callbacks(app, _shared_status, _time_series, _current_se
                 current_store['measurement_duration'],
                 current_store['sample_interval'],
                 current_store['stabilization_time'],
-                current_store['maximum_current']
+                current_store['maximum_current'],
+                current_store['ac_voltage'],
+                current_store['ac_frequency'],
             )
 
         elif triggered_id == 'confirm-config':
@@ -98,11 +103,14 @@ def register_iv_control_callbacks(app, _shared_status, _time_series, _current_se
                 'measurement_duration': dur,
                 'sample_interval': si,
                 'stabilization_time': stab,
-                'maximum_current': maxc
+                'maximum_current': maxc,
+                'ac_voltage' : acv,
+                'ac_frequency' : acf,
             }
-            with open("iv_control/config.yaml", "w") as f:
+            with open("configs/config.yaml", "w") as f:
+                print("save")
                 yaml.safe_dump(updated, f)
-            return (updated, sv, ev, step, dur, si, stab, maxc)
+            return (updated, sv, ev, step, dur, si, stab, maxc, acv, acf)
 
-        return dash.no_update, *([dash.no_update] * 7)
+        return dash.no_update, *([dash.no_update] * 9)
 
