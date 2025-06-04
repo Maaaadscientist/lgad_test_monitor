@@ -14,6 +14,40 @@ def set_stop_event(event):
 def get_iv_data():
     return time_series, current_series
 
+def ramp_voltage(instr, target_voltage, step=1.0, delay=0.05, maximum_current=10e-6):
+    try:
+        current_voltage = float(instr.ask("SOUR:VOLT:LEV?"))
+    except Exception as e:
+        print(f"⚠️ Failed to read current voltage: {e}")
+        current_voltage = 0.0
+
+    if abs(current_voltage - target_voltage) < 1e-3:
+        return
+
+    step = abs(step)
+    direction = 1 if target_voltage > current_voltage else -1
+    steps = np.arange(current_voltage, target_voltage, direction * step)
+
+    for v in steps:
+        instr.write(f"SOUR:VOLT:LEV {v}")
+        time.sleep(delay)
+
+        # 每步测一次电流并限流保护
+        try:
+            current = float(instr.ask("MEAS:CURR?"))
+        except Exception as e:
+            print(f"⚠️ Current read error at {v:.2f}V: {e}")
+            current = 0.0  # fallback, allow next step
+
+        if abs(current) > maximum_current:
+            print(f"🛑 Over-current during ramp: {current:.3e} A > {maximum_current:.3e} A")
+            instr.write("OUTP OFF")
+            instr.write("*CLS")
+            raise RuntimeError("Ramp aborted due to overcurrent")
+
+    # 最终电压
+    instr.write(f"SOUR:VOLT:LEV {target_voltage}")
+
 def perform_measurement(shared_status, time_series, current_series, iv_curve, stop_event):
     """
     主测量函数，负责控制 Keithley 2470，记录数据并实时更新状态。
@@ -38,7 +72,11 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
     stabilization_time = cfg['stabilization_time']
     maximum_current = cfg['maximum_current'] * 1e-6
 
-    voltages = np.arange(start_voltage, stop_voltage + step_voltage, step_voltage)
+    if start_voltage < stop_voltage:
+        voltages = np.arange(start_voltage, stop_voltage + step_voltage, step_voltage)
+    else:
+        voltages = np.arange(start_voltage, stop_voltage - step_voltage, -step_voltage)
+
 
     instr = setup_instrument()
     iv_curve.clear()
@@ -50,8 +88,9 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
             instr.write("*CLS")
             return
 
-        instr.write(f"SOUR:VOLT:LEV {v}")
         instr.write("OUTP ON")
+        #instr.write(f"SOUR:VOLT:LEV {v}")
+        ramp_voltage(instr, v, step=5.0, delay=0.2, maximum_current=maximum_current)  # 然后缓慢加压
 
         time_series.clear()
         current_series.clear()
@@ -59,6 +98,9 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
         current_data = []
         humi = []
         temp = []
+
+        # 初始化用于记录连续超限计数的变量（放在 while 循环前）
+        over_current_count = 0
 
         start_time = time.perf_counter()
         
@@ -77,11 +119,14 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
                 current = np.nan
         
             if abs(current) > maximum_current:
-                print(f"⚠️ Over-current! {current:.3e} A > {maximum_current:.3e} A")
-                instr.write("OUTP OFF")
-                instr.write("*CLS")
-                stop_event.set()
-                return
+                over_current_count += 1
+                print(f"⚠️ Over-current count: {over_current_count} ({current:.3e} A > {maximum_current:.3e} A)")
+                if over_current_count >= 3:
+                    print("🔴 Triggering emergency stop due to 3 consecutive over-current readings.")
+                    instr.write("OUTP OFF")
+                    instr.write("*CLS")
+                    stop_event.set()
+                    return
         
             # 获取当前温湿度
             humidity = shared_status.get("humidity", "N/A")
@@ -107,6 +152,7 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
                 time.sleep(sleep_time)
 
 
+        ramp_voltage(instr, 0, step=5.0, delay=0.2, maximum_current=maximum_current)  # 然后缓慢加压
         instr.write("OUTP OFF")
 
         # 平均电流计算（最后几秒）

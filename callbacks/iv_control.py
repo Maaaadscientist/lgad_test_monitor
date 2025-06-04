@@ -32,7 +32,7 @@ def register_iv_control_callbacks(app, _shared_status, _time_series, _current_se
             return True, False
         elif ctx.triggered_id == 'stop-button':
             stop_event.set()
-            instr.write("OUTP OFF")
+            #instr.write("OUTP OFF")
             return False, True
         return dash.no_update, dash.no_update
 
