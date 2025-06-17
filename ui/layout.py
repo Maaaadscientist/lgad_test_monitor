@@ -95,16 +95,16 @@ def generate_layout():
         ),
         dcc.Graph(
             id='live-graph',
-            style={'width': '90vw', 'height': '42vh',}  # 使用视口单位
+            style={'width': '90vw', 'height': '40vh',}  # 使用视口单位
         ),
         html.Hr(),
         #html.H4("Plot I-V Curve"),
         dcc.Graph(id='iv-graph', 
-                  style={'width': '90vw', 'height': '42vh'}
+                  style={'width': '90vw', 'height': '40vh'}
                  ),
         html.Hr(),
         dcc.Graph(id='cv-graph', 
-                  style={'width': '90vw', 'height': '42vh'}
+                  style={'width': '90vw', 'height': '40vh'}
                  ),
         # 定时器组件
         dcc.Interval(id='interval', interval=1000, n_intervals=0),

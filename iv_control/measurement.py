@@ -90,7 +90,7 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
 
         instr.write("OUTP ON")
         #instr.write(f"SOUR:VOLT:LEV {v}")
-        ramp_voltage(instr, v, step=5.0, delay=0.2, maximum_current=maximum_current)  # 然后缓慢加压
+        ramp_voltage(instr, v, step=30.0, delay=0.05, maximum_current=maximum_current)  # 然后缓慢加压
 
         time_series.clear()
         current_series.clear()
@@ -152,7 +152,7 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
                 time.sleep(sleep_time)
 
 
-        ramp_voltage(instr, 0, step=5.0, delay=0.2, maximum_current=maximum_current)  # 然后缓慢加压
+        ramp_voltage(instr, 0, step=30.0, delay=0.05, maximum_current=maximum_current)  # 然后缓慢加压
         instr.write("OUTP OFF")
 
         # 平均电流计算（最后几秒）
