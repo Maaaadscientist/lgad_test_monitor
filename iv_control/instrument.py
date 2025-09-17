@@ -1,5 +1,6 @@
 import usbtmc, time, usb.backend.libusb1
 from iv_control.config import load_config
+from iv_control.SimpleKeithley6487 import SimpleKeithley6487
 
 def setup_instrument():
     backend = usb.backend.libusb1.get_backend()
@@ -32,5 +33,8 @@ def setup_instrument():
     instr.write(f"SOUR:VOLT:RANG {voltage_range}")  # ✅ 动态范围设置
     instr.write("SENS:FUNC 'CURR'")
 
-    return instr
+    meter = SimpleKeithley6487(port='/dev/ttyUSB0')
+    meter.setup_for_measurement()
+
+    return instr, meter
 

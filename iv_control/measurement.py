@@ -14,7 +14,7 @@ def set_stop_event(event):
 def get_iv_data():
     return time_series, current_series
 
-def ramp_voltage(instr, target_voltage, step=1.0, delay=0.05, maximum_current=10e-6):
+def ramp_voltage(instr, meter, target_voltage, step=1.0, delay=0.05, maximum_current=10e-6):
     try:
         current_voltage = float(instr.ask("SOUR:VOLT:LEV?"))
     except Exception as e:
@@ -22,31 +22,36 @@ def ramp_voltage(instr, target_voltage, step=1.0, delay=0.05, maximum_current=10
         current_voltage = 0.0
 
     if abs(current_voltage - target_voltage) < 1e-3:
-        return
+        return True
 
     step = abs(step)
     direction = 1 if target_voltage > current_voltage else -1
     steps = np.arange(current_voltage, target_voltage, direction * step)
-
+    steps = np.append(steps, target_voltage)
+    
+    print( target_voltage, steps)
     for v in steps:
         instr.write(f"SOUR:VOLT:LEV {v}")
         time.sleep(delay)
 
         # 每步测一次电流并限流保护
         try:
-            current = float(instr.ask("MEAS:CURR?"))
+            current_source = float(instr.ask("MEAS:CURR?"))
+            current = float(meter.read_current())
         except Exception as e:
             print(f"⚠️ Current read error at {v:.2f}V: {e}")
             current = 0.0  # fallback, allow next step
 
-        if abs(current) > maximum_current:
+        if abs(current) > maximum_current or abs(current_source) > 3 * maximum_current:
             print(f"🛑 Over-current during ramp: {current:.3e} A > {maximum_current:.3e} A")
             instr.write("OUTP OFF")
             instr.write("*CLS")
-            raise RuntimeError("Ramp aborted due to overcurrent")
+            return False
 
     # 最终电压
     instr.write(f"SOUR:VOLT:LEV {target_voltage}")
+    time.sleep(delay)
+    return True
 
 def perform_measurement(shared_status, time_series, current_series, iv_curve, stop_event):
     """
@@ -78,7 +83,7 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
         voltages = np.arange(start_voltage, stop_voltage - step_voltage, -step_voltage)
 
 
-    instr = setup_instrument()
+    instr, meter = setup_instrument()
     iv_curve.clear()
 
     for v in voltages:
@@ -88,14 +93,17 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
             instr.write("*CLS")
             return
 
-        instr.write("OUTP ON")
         #instr.write(f"SOUR:VOLT:LEV {v}")
-        ramp_voltage(instr, v, step=30.0, delay=0.05, maximum_current=maximum_current)  # 然后缓慢加压
+        instr.write("OUTP ON")
+        voltage_output = ramp_voltage(instr, meter, v, step=30.0, delay=0.05, maximum_current=maximum_current)  # 然后缓慢加压
 
+        if not voltage_output:
+            break
         time_series.clear()
         current_series.clear()
         timestamps = []
         current_data = []
+        current_total = []
         humi = []
         temp = []
 
@@ -113,18 +121,19 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
             elapsed = loop_start - start_time
         
             try:
-                current = float(instr.ask("MEAS:CURR?"))
+                current_source = float(instr.ask("MEAS:CURR?"))
+                current = meter.read_current()
             except Exception as e:
                 print(f"⚠️ Read error: {e}")
                 current = np.nan
-        
+                current_source = np.nan 
             if abs(current) > maximum_current:
                 over_current_count += 1
                 print(f"⚠️ Over-current count: {over_current_count} ({current:.3e} A > {maximum_current:.3e} A)")
-                if over_current_count >= 3:
+                if over_current_count > 3:
                     print("🔴 Triggering emergency stop due to 3 consecutive over-current readings.")
-                    instr.write("OUTP OFF")
-                    instr.write("*CLS")
+                    instr.write("outp off")
+                    instr.write("*cls")
                     stop_event.set()
                     return
         
@@ -139,6 +148,7 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
             temp.append(temperature)
             time_series.append(elapsed)
             current_series.append(current)
+            current_total.append(current_source)
         
             # 更新状态
             shared_status["voltage"] = v
@@ -152,8 +162,10 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
                 time.sleep(sleep_time)
 
 
-        ramp_voltage(instr, 0, step=30.0, delay=0.05, maximum_current=maximum_current)  # 然后缓慢加压
+        voltage_turnoff = ramp_voltage(instr, meter, 0, step=30.0, delay=0.05, maximum_current=maximum_current)  # 然后缓慢加压
         instr.write("OUTP OFF")
+        if not voltage_turnoff:
+            break
 
         # 平均电流计算（最后几秒）
         stable_data = [i for t, i in zip(timestamps, current_data)
@@ -162,7 +174,7 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
         iv_curve.append((v, avg_current))
 
         # 保存 I-t 数据点
-        df = pd.DataFrame({'Time(s)': timestamps, 'Current(A)': current_data, 'Temperature(°C)':temp, 'Humidity(%RH)':humi})
+        df = pd.DataFrame({'Time(s)': timestamps, 'Current(A)': current_data, 'Temperature(°C)':temp, 'Humidity(%RH)':humi, 'Current(Total)': current_total})
         df.to_csv(f"{output_dir}/reuslts_{v:.2f}V.csv", index=False)
 
     # 保存最终 I-V 曲线

@@ -10,3 +10,18 @@ And then,
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
+
+Same for the LCR meter,
+```
+sudo vim /etc/udev/rules.d/99-keysight-e4980a.rules
+```
+add this line
+```
+SUBSYSTEM=="usb", ATTR{idVendor}=="2a8d", ATTR{idProduct}=="2f01", MODE="0666"
+```
+and the execute
+```
+sudo udevadm control --reload
+sudo udevadm trigger
+```
+
