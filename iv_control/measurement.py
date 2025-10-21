@@ -1,22 +1,36 @@
+import math
+import os
 import time
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
-import os
-from datetime import datetime
-from iv_control.instrument import setup_instrument
+
+from instruments import InstrumentSettings, create_instrument_suite
+from instruments.base import HVSource, PicoAmmeter
+from instruments.hv_sources import VirtualHVSource
+from instruments.picoammeters import VirtualPicoAmmeter
 from iv_control.config import load_config
-import threading
 
-def set_stop_event(event):
-    global stop_event
-    stop_event = event
 
-def get_iv_data():
-    return time_series, current_series
+def _over_limit(value: float, limit: float) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, float) and math.isnan(value):
+        return False
+    return abs(value) > limit
 
-def ramp_voltage(instr, meter, target_voltage, step=1.0, delay=0.05, maximum_current=10e-6):
+
+def ramp_voltage(
+    hv_source: HVSource,
+    picoammeter: PicoAmmeter,
+    target_voltage: float,
+    step: float = 1.0,
+    delay: float = 0.05,
+    maximum_current: float = 10e-6,
+) -> bool:
     try:
-        current_voltage = float(instr.ask("SOUR:VOLT:LEV?"))
+        current_voltage = float(hv_source.get_voltage())
     except Exception as e:
         print(f"⚠️ Failed to read current voltage: {e}")
         current_voltage = 0.0
@@ -29,30 +43,66 @@ def ramp_voltage(instr, meter, target_voltage, step=1.0, delay=0.05, maximum_cur
     steps = np.arange(current_voltage, target_voltage, direction * step)
     steps = np.append(steps, target_voltage)
     
-    print( target_voltage, steps)
+    print(target_voltage, steps)
     for v in steps:
-        instr.write(f"SOUR:VOLT:LEV {v}")
+        hv_source.set_voltage(v)
         time.sleep(delay)
 
         # 每步测一次电流并限流保护
         try:
-            current_source = float(instr.ask("MEAS:CURR?"))
-            current = float(meter.read_current())
+            current_source = float(hv_source.measure_current())
+            current = float(picoammeter.read_current())
         except Exception as e:
             print(f"⚠️ Current read error at {v:.2f}V: {e}")
             current = 0.0  # fallback, allow next step
+            current_source = 0.0
 
-        if abs(current) > maximum_current or abs(current_source) > 3 * maximum_current:
+        if (
+            _over_limit(current, maximum_current)
+            or _over_limit(current_source, 3 * maximum_current)
+        ):
             print(f"🛑 Over-current during ramp: {current:.3e} A > {maximum_current:.3e} A")
-            instr.write("OUTP OFF")
-            instr.write("*CLS")
+            hv_source.enable_output(False)
             return False
 
     # 最终电压
-    instr.write(f"SOUR:VOLT:LEV {target_voltage}")
+    hv_source.set_voltage(target_voltage)
     time.sleep(delay)
     return True
 
+
+def _ensure_hv_source(hv_source: HVSource, suite, hv_options) -> HVSource:
+    try:
+        hv_source.connect()
+        return hv_source
+    except Exception as exc:
+        print(f"⚠️ HV source unavailable ({exc}); switching to virtual source.")
+        fallback = VirtualHVSource(
+            noise=hv_options.get("noise", 5e-12),
+            load_resistance=hv_options.get("virtual_dut_resistance", hv_options.get("load_resistance", 1e7)),
+        )
+        fallback.connect()
+        suite.hv_source = fallback
+        return fallback
+
+
+def _ensure_picoammeter(picoammeter: PicoAmmeter, suite, hv_source: HVSource, pico_options) -> PicoAmmeter:
+    try:
+        picoammeter.connect()
+        if isinstance(picoammeter, VirtualPicoAmmeter):
+            picoammeter.attach_hv_source(hv_source)
+            picoammeter.set_resistance(pico_options.get("virtual_dut_resistance", pico_options.get("load_resistance", 1e7)))
+        return picoammeter
+    except Exception as exc:
+        print(f"⚠️ Picoammeter unavailable ({exc}); using virtual DUT (10MΩ).")
+        fallback = VirtualPicoAmmeter(
+            noise=pico_options.get("noise", 2e-12),
+            hv_source=hv_source,
+            resistance_ohm=pico_options.get("virtual_dut_resistance", pico_options.get("load_resistance", 1e7)),
+        )
+        fallback.connect()
+        suite.picoammeter = fallback
+        return fallback
 def perform_measurement(shared_status, time_series, current_series, iv_curve, stop_event):
     """
     主测量函数，负责控制 Keithley 2470，记录数据并实时更新状态。
@@ -83,103 +133,159 @@ def perform_measurement(shared_status, time_series, current_series, iv_curve, st
         voltages = np.arange(start_voltage, stop_voltage - step_voltage, -step_voltage)
 
 
-    instr, meter = setup_instrument()
+    instruments_cfg = InstrumentSettings.from_config(cfg)
+    suite = create_instrument_suite(instruments_cfg)
+    hv_source = suite.hv_source
+    picoammeter = suite.picoammeter
+
+    hv_source = _ensure_hv_source(hv_source, suite, instruments_cfg.hv_options)
+    picoammeter = _ensure_picoammeter(
+        picoammeter,
+        suite,
+        hv_source,
+        instruments_cfg.pico_options,
+    )
+
+    if isinstance(hv_source, VirtualHVSource) and not isinstance(picoammeter, VirtualPicoAmmeter):
+        print("⚠️ HV source fallback detected; routing current through virtual 10MΩ DUT.")
+        try:
+            picoammeter.shutdown()
+        except Exception:
+            pass
+        picoammeter = VirtualPicoAmmeter(
+            noise=instruments_cfg.pico_options.get("noise", 2e-12),
+            hv_source=hv_source,
+            resistance_ohm=instruments_cfg.pico_options.get("virtual_dut_resistance", 1e7),
+        )
+        picoammeter.connect()
+        suite.picoammeter = picoammeter
+
+    print(
+        "▶️ Starting IV measurement using",
+        hv_source.__class__.__name__,
+        "HV and",
+        picoammeter.__class__.__name__,
+        "ammeter",
+    )
+
     iv_curve.clear()
 
-    for v in voltages:
-        if stop_event.is_set():
-            print("🔴 Measurement stopped before next voltage step.")
-            instr.write("OUTP OFF")
-            instr.write("*CLS")
-            return
-
-        #instr.write(f"SOUR:VOLT:LEV {v}")
-        instr.write("OUTP ON")
-        voltage_output = ramp_voltage(instr, meter, v, step=30.0, delay=0.05, maximum_current=maximum_current)  # 然后缓慢加压
-
-        if not voltage_output:
-            break
-        time_series.clear()
-        current_series.clear()
-        timestamps = []
-        current_data = []
-        current_total = []
-        humi = []
-        temp = []
-
-        # 初始化用于记录连续超限计数的变量（放在 while 循环前）
-        over_current_count = 0
-
-        start_time = time.perf_counter()
-        
-        while (time.perf_counter() - start_time) < measurement_duration:
+    try:
+        for v in voltages:
             if stop_event.is_set():
-                instr.write("OUTP OFF")
-                instr.write("*CLS")
+                print("🔴 Measurement stopped before next voltage step.")
                 return
-            loop_start = time.perf_counter()
-            elapsed = loop_start - start_time
-        
+
+            hv_source.enable_output(True)
+            voltage_output = ramp_voltage(
+                hv_source,
+                picoammeter,
+                v,
+                step=30.0,
+                delay=0.05,
+                maximum_current=maximum_current,
+            )
+
+            if not voltage_output:
+                break
+            time_series.clear()
+            current_series.clear()
+            timestamps = []
+            current_data = []
+            current_total = []
+            humi = []
+            temp = []
+
+            # 初始化用于记录连续超限计数的变量（放在 while 循环前）
+            over_current_count = 0
+
+            start_time = time.perf_counter()
+            
+            while (time.perf_counter() - start_time) < measurement_duration:
+                if stop_event.is_set():
+                    return
+                loop_start = time.perf_counter()
+                elapsed = loop_start - start_time
+            
             try:
-                current_source = float(instr.ask("MEAS:CURR?"))
-                current = meter.read_current()
+                current_source = float(hv_source.measure_current())
+            except Exception as e:
+                print(f"⚠️ Source read error: {e}")
+                current_source = np.nan
+
+            try:
+                current = float(picoammeter.read_current())
             except Exception as e:
                 print(f"⚠️ Read error: {e}")
                 current = np.nan
-                current_source = np.nan 
-            if abs(current) > maximum_current:
-                over_current_count += 1
-                print(f"⚠️ Over-current count: {over_current_count} ({current:.3e} A > {maximum_current:.3e} A)")
-                if over_current_count > 3:
-                    print("🔴 Triggering emergency stop due to 3 consecutive over-current readings.")
-                    instr.write("outp off")
-                    instr.write("*cls")
-                    stop_event.set()
-                    return
-        
-            # 获取当前温湿度
-            humidity = shared_status.get("humidity", "N/A")
-            temperature = shared_status.get("temperature", "N/A")
-        
-            # 记录数据
-            timestamps.append(elapsed)
-            current_data.append(current)
-            humi.append(humidity)
-            temp.append(temperature)
-            time_series.append(elapsed)
-            current_series.append(current)
-            current_total.append(current_source)
-        
-            # 更新状态
-            shared_status["voltage"] = v
-            shared_status["current"] = current
-            shared_status["time"] = elapsed
-        
-            # 计算睡眠时间（周期补偿）
-            loop_duration = time.perf_counter() - loop_start
-            sleep_time = sample_interval - loop_duration
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+
+            if isinstance(picoammeter, VirtualPicoAmmeter) and not math.isnan(current):
+                current_source = current
+                if _over_limit(current, maximum_current):
+                    over_current_count += 1
+                    print(f"⚠️ Over-current count: {over_current_count} ({current:.3e} A > {maximum_current:.3e} A)")
+                    if over_current_count > 3:
+                        print("🔴 Triggering emergency stop due to 3 consecutive over-current readings.")
+                        stop_event.set()
+                        return
+            
+                # 获取当前温湿度
+                humidity = shared_status.get("humidity", "N/A")
+                temperature = shared_status.get("temperature", "N/A")
+            
+                # 记录数据
+                timestamps.append(elapsed)
+                current_data.append(current)
+                humi.append(humidity)
+                temp.append(temperature)
+                time_series.append(elapsed)
+                current_series.append(current)
+                current_total.append(current_source)
+            
+                # 更新状态
+                shared_status["voltage"] = v
+                shared_status["current"] = current
+                shared_status["time"] = elapsed
+            
+                # 计算睡眠时间（周期补偿）
+                loop_duration = time.perf_counter() - loop_start
+                sleep_time = sample_interval - loop_duration
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
 
 
-        voltage_turnoff = ramp_voltage(instr, meter, 0, step=30.0, delay=0.05, maximum_current=maximum_current)  # 然后缓慢加压
-        instr.write("OUTP OFF")
-        if not voltage_turnoff:
-            break
+            voltage_turnoff = ramp_voltage(
+                hv_source,
+                picoammeter,
+                0,
+                step=30.0,
+                delay=0.05,
+                maximum_current=maximum_current,
+            )
+            hv_source.enable_output(False)
+            if not voltage_turnoff:
+                break
 
-        # 平均电流计算（最后几秒）
-        stable_data = [i for t, i in zip(timestamps, current_data)
-                       if t > (measurement_duration - stabilization_time)]
-        avg_current = np.nanmean(stable_data)
-        iv_curve.append((v, avg_current))
+            # 平均电流计算（最后几秒）
+            stable_data = [i for t, i in zip(timestamps, current_data)
+                           if t > (measurement_duration - stabilization_time)]
+            avg_current = np.nanmean(stable_data)
+            iv_curve.append((v, avg_current))
 
-        # 保存 I-t 数据点
-        df = pd.DataFrame({'Time(s)': timestamps, 'Current(A)': current_data, 'Temperature(°C)':temp, 'Humidity(%RH)':humi, 'Current(Total)': current_total})
-        df.to_csv(f"{output_dir}/reuslts_{v:.2f}V.csv", index=False)
+            # 保存 I-t 数据点
+            df = pd.DataFrame({
+                'Time(s)': timestamps,
+                'Current(A)': current_data,
+                'Temperature(°C)': temp,
+                'Humidity(%RH)': humi,
+                'SourceCurrent(A)': current_total,
+            })
+            df.to_csv(f"{output_dir}/results_{v:.2f}V.csv", index=False)
 
-    # 保存最终 I-V 曲线
-    pd.DataFrame(iv_curve, columns=["Voltage(V)", "Current(A)"]).to_csv(f"{output_dir}/IV_Curve.csv", index=False)
-
-    instr.write("OUTP OFF")
-    instr.write("*CLS")
-    print("✅ Measurement complete.")
+        # 保存最终 I-V 曲线
+        pd.DataFrame(iv_curve, columns=["Voltage(V)", "Current(A)"]).to_csv(
+            f"{output_dir}/IV_Curve.csv", index=False)
+        print("✅ Measurement complete.")
+    finally:
+        hv_source.enable_output(False)
+        suite.shutdown_all()

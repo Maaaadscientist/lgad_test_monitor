@@ -22,11 +22,14 @@ def register_cv_plot_callback(app):
         # --------- 如果是“Plot I–V”按钮被按下
         if triggered_id == 'plot-cv-button':
             # 列出所有 outputs/iv_results_* 文件夹
-            folders = sorted(
-                [f"outputs/{d}" for d in os.listdir("outputs")
-                 if d.startswith("iv_results_") and os.path.isdir(os.path.join("outputs", d))],
-                reverse=True
-            )
+            try:
+                folders = sorted(
+                    [f"outputs/{d}" for d in os.listdir("outputs")
+                     if d.startswith("cv_results_") and os.path.isdir(os.path.join("outputs", d))],
+                    reverse=True
+                )
+            except FileNotFoundError:
+                folders = []
             options = [{'label': f, 'value': f} for f in folders]
             # 显示面板 + 填充下拉菜单
             return {'display': 'block'}, options
@@ -73,7 +76,8 @@ def register_cv_plot_callback(app):
         try:
             files = sorted([
                 f for f in os.listdir(selected_path)
-                if f.endswith(".csv") and f.startswith("reuslts_")
+                if f.endswith(".csv")
+                and (f.startswith("results_") or f.startswith("reuslts_"))
             ])
             cfg = load_config()
             stab_time = cfg.get("stabilization_time", 2)
@@ -81,28 +85,45 @@ def register_cv_plot_callback(app):
                 voltage_str = fname.split('_')[-1].replace('V.csv', '')
                 voltage = float(voltage_str)
                 df = pd.read_csv(os.path.join(selected_path, fname))
-                stabilization_time = stab_time
-                
-                last_seconds = df[df["Time(s)"] > df["Time(s)"].max() - stabilization_time]
-                avg_current = last_seconds["Current(A)"].mean()
-                data_points.append((voltage, avg_current))
+
+                if "Cp(F)" in df.columns:
+                    cap_series = df["Cp(F)"]
+                    scale_to_pf = 1e12
+                elif "Cp(uF)" in df.columns:
+                    cap_series = df["Cp(uF)"]
+                    scale_to_pf = 1e6
+                else:
+                    continue
+
+                last_seconds = df[df["Time(s)"] > df["Time(s)"].max() - stab_time]
+                window = cap_series.loc[last_seconds.index]
+                if window.empty:
+                    window = cap_series
+
+                avg_cap_pf = window.mean() * scale_to_pf
+                data_points.append((voltage, avg_cap_pf))
+
+            if not data_points:
+                return fig
 
             data_points.sort()
-            voltages, currents = zip(*data_points)
+            voltages, capacitances = zip(*data_points)
 
             fig.add_trace(go.Scatter(
                 x=voltages,
-                y=currents,
+                y=capacitances,
                 mode='markers+lines',
-                name='I–V Curve',
+                name='C–V Curve',
                 marker=dict(color='gold',symbol='square',size=10),
                 marker_line=dict(color='orange',width=4),
                 line=dict(color='orange',width=4),
             ))
 
-            fig.update_layout(
-                yaxis_type='log' if max(currents)/min(currents) > 1e2 else 'linear',
-            )
+            if capacitances and min(capacitances) > 0:
+                ratio = max(capacitances)/min(capacitances) if min(capacitances) else 0
+                fig.update_layout(
+                    yaxis_type='log' if ratio > 1e2 else 'linear',
+                )
             return fig
 
         except Exception as e:

@@ -1,9 +1,9 @@
 ac_frequency: 10
 ac_voltage: 100
-maximum_current: 1
-measurement_duration: 10
+maximum_current: 100
+measurement_duration: 20
 sample_interval: 0.5
 stabilization_time: 5
-start_voltage: 20
+start_voltage: -20
 step_voltage: 2
-stop_voltage: 30
+stop_voltage: -50

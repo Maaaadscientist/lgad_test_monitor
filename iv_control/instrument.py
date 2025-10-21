@@ -1,40 +1,23 @@
-import usbtmc, time, usb.backend.libusb1
+"""Deprecated helpers for backward compatibility.
+
+Use the classes under `instruments.*` instead of this module.
+"""
+from __future__ import annotations
+
+from instruments import InstrumentSettings, create_instrument_suite
 from iv_control.config import load_config
-from iv_control.SimpleKeithley6487 import SimpleKeithley6487
 
-def setup_instrument():
-    backend = usb.backend.libusb1.get_backend()
-    instr = usbtmc.Instrument(0x05E6, 0x2470, backend=backend)
+instr = None  # Legacy name retained for backward compatibility
 
-    cfg = load_config()  # ✅ 每次运行动态读取配置
 
-    start_voltage = cfg['start_voltage']
-    stop_voltage = cfg['stop_voltage']
+def setup_instrument(config: dict | None = None):
+    """Return instrument wrappers for legacy callers.
 
-    # 获取最大绝对电压
-    max_abs_voltage = max(abs(start_voltage), abs(stop_voltage))
-
-    # 自动选择合适的电压范围
-    if max_abs_voltage <= 0.2:
-        voltage_range = 0.2
-    elif max_abs_voltage <= 2:
-        voltage_range = 2
-    elif max_abs_voltage <= 20:
-        voltage_range = 20
-    elif max_abs_voltage <= 200:
-        voltage_range = 200
-    else:
-        voltage_range = 1000  # 超出范围默认使用最大支持值
-
-    instr.write("*CLS")
-    instr.write("*RST")
-    time.sleep(1)
-    instr.write("SOUR:FUNC VOLT")
-    instr.write(f"SOUR:VOLT:RANG {voltage_range}")  # ✅ 动态范围设置
-    instr.write("SENS:FUNC 'CURR'")
-
-    meter = SimpleKeithley6487(port='/dev/ttyUSB0')
-    meter.setup_for_measurement()
-
-    return instr, meter
-
+    This now returns the new HV source and picoammeter wrappers. Prefer using
+    `instruments.create_instrument_suite` directly in new code.
+    """
+    cfg = config or load_config()
+    suite = create_instrument_suite(InstrumentSettings.from_config(cfg))
+    suite.hv_source.connect()
+    suite.picoammeter.connect()
+    return suite.hv_source, suite.picoammeter

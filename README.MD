@@ -25,3 +25,7 @@ sudo udevadm control --reload
 sudo udevadm trigger
 ```
 
+
+## Instrument Configuration
+
+The `configs/config.yaml` file now includes an `instruments` section. Set each entry to the hardware you have available (`keithley_2470`, `keithley_6487`, `keithley_6485`, `keysight_e4980a`) or to `virtual` when you just want to exercise the measurement flow without devices attached. Optional `*_options` blocks let you provide details such as serial ports, custom noise levels, or the effective DUT resistance used when automatically falling back to the virtual instrumentation (defaults to 10 MΩ).

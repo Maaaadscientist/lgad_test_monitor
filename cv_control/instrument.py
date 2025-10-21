@@ -1,31 +1,19 @@
-import usbtmc
-import time
-import usb.core
-import usb.backend.libusb1
+"""Deprecated LCR helpers kept for import compatibility.
+
+The new instrument abstraction lives under the `instruments` package.
+"""
+from __future__ import annotations
+
+from instruments import InstrumentSettings, create_instrument_suite
 from iv_control.config import load_config
 
-#backend = usb.backend.libusb1.get_backend()
-#lcr = usbtmc.Instrument(0x2a8d, 0x0101, backend=backend)  # Update if needed
+lcr = None  # Legacy export retained for compatibility
 
-def find_lcr_vid_pid(expected_idn="E4980A"):
-    backend = usb.backend.libusb1.get_backend()
-    devices = usb.core.find(find_all=True, backend=backend)
 
-    for dev in devices:
-        try:
-            # Try creating a USBTMC instrument
-            instr = usbtmc.Instrument(dev.idVendor, dev.idProduct, backend=backend)
-            idn = instr.ask("*IDN?").strip()
-            if expected_idn in idn:
-                print(f"✅ Found: {idn} (VID=0x{dev.idVendor:04x}, PID=0x{dev.idProduct:04x})")
-                return dev.idVendor, dev.idProduct
-        except Exception as e:
-            continue
-
-    raise RuntimeError(f"❌ No USBTMC device responding with '{expected_idn}' found.")
-
-# Automatically detect and connect
-VID, PID = find_lcr_vid_pid()
-backend = usb.backend.libusb1.get_backend()
-lcr = usbtmc.Instrument(VID, PID, backend=backend)
-
+def setup_lcr(config: dict | None = None):
+    cfg = config or load_config()
+    suite = create_instrument_suite(InstrumentSettings.from_config(cfg))
+    if suite.lcr_meter is None:
+        raise RuntimeError("No LCR meter configured in config.yaml")
+    suite.lcr_meter.connect()
+    return suite.lcr_meter

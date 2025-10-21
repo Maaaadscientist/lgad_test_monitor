@@ -21,11 +21,14 @@ def register_iv_plot_callback(app):
         # --------- 如果是“Plot I–V”按钮被按下
         if triggered_id == 'plot-iv-button':
             # 列出所有 outputs/iv_results_* 文件夹
-            folders = sorted(
-                [f"outputs/{d}" for d in os.listdir("outputs")
-                 if d.startswith("iv_results_") and os.path.isdir(os.path.join("outputs", d))],
-                reverse=True
-            )
+            try:
+                folders = sorted(
+                    [f"outputs/{d}" for d in os.listdir("outputs")
+                     if d.startswith("iv_results_") and os.path.isdir(os.path.join("outputs", d))],
+                    reverse=True
+                )
+            except FileNotFoundError:
+                folders = []
             options = [{'label': f, 'value': f} for f in folders]
             # 显示面板 + 填充下拉菜单
             return {'display': 'block'}, options
@@ -74,8 +77,11 @@ def register_iv_plot_callback(app):
         try:
             files = sorted([
                 f for f in os.listdir(selected_path)
-                if f.endswith(".csv") and f.startswith("reuslts_")
+                if f.endswith(".csv")
+                and (f.startswith("results_") or f.startswith("reuslts_"))
             ])
+            if not files:
+                return go.Figure(existing_figure)
             cfg = load_config()
             stab_time = cfg.get("stabilization_time", 2)
             data_points = []
@@ -85,7 +91,10 @@ def register_iv_plot_callback(app):
                 voltage = float(voltage_str)
                 df = pd.read_csv(os.path.join(selected_path, fname))
                 last_seconds = df[df["Time(s)"] > df["Time(s)"].max() - stab_time]
-                avg_current = last_seconds["Current(A)"].mean()
+                if last_seconds.empty:
+                    avg_current = df["Current(A)"].mean()
+                else:
+                    avg_current = last_seconds["Current(A)"].mean()
                 data_points.append((abs(voltage), abs(avg_current)))
     
             data_points.sort()
